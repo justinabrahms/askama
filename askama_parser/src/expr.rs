@@ -4,13 +4,12 @@ use nom::branch::alt;
 use nom::bytes::complete::{tag, take_till};
 use nom::character::complete::char;
 use nom::combinator::{cut, map, not, opt, peek, recognize};
+use nom::error::ErrorKind;
 use nom::multi::{fold_many0, many0, separated_list0, separated_list1};
 use nom::sequence::{delimited, pair, preceded, terminated, tuple};
-use nom::IResult;
+use nom::{error_position, IResult};
 
-use super::{
-    bool_lit, char_lit, identifier, nested_parenthesis, not_ws, num_lit, path, str_lit, ws,
-};
+use super::{bool_lit, char_lit, identifier, not_ws, num_lit, path, str_lit, ws};
 
 #[derive(Debug, PartialEq)]
 pub enum Expr<'a> {
@@ -200,6 +199,54 @@ fn expr_suffix(i: &str) -> IResult<&str, Expr<'_>> {
 
 fn macro_arguments(i: &str) -> IResult<&str, &str> {
     delimited(char('('), recognize(nested_parenthesis), char(')'))(i)
+}
+
+fn nested_parenthesis(i: &str) -> IResult<&str, ()> {
+    let mut nested = 0;
+    let mut last = 0;
+    let mut in_str = false;
+    let mut escaped = false;
+
+    for (i, b) in i.chars().enumerate() {
+        if !(b == '(' || b == ')') || !in_str {
+            match b {
+                '(' => nested += 1,
+                ')' => {
+                    if nested == 0 {
+                        last = i;
+                        break;
+                    }
+                    nested -= 1;
+                }
+                '"' => {
+                    if in_str {
+                        if !escaped {
+                            in_str = false;
+                        }
+                    } else {
+                        in_str = true;
+                    }
+                }
+                '\\' => {
+                    escaped = !escaped;
+                }
+                _ => (),
+            }
+        }
+
+        if escaped && b != '\\' {
+            escaped = false;
+        }
+    }
+
+    if nested == 0 {
+        Ok((&i[last..], ()))
+    } else {
+        Err(nom::Err::Error(error_position!(
+            i,
+            ErrorKind::SeparatedNonEmptyList
+        )))
+    }
 }
 
 fn expr_rust_macro(i: &str) -> IResult<&str, Expr<'_>> {
