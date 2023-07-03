@@ -125,29 +125,48 @@ enum Suffix<'a> {
     Try,
 }
 
-fn expr_attr(i: &str) -> IResult<&str, Suffix<'_>> {
-    map(
-        preceded(
-            ws(pair(char('.'), not(char('.')))),
-            cut(alt((num_lit, identifier))),
-        ),
-        Suffix::Attr,
-    )(i)
-}
+impl<'a> Suffix<'a> {
+    fn parse(i: &'a str) -> IResult<&'a str, Expr<'a>> {
+        let (mut i, mut expr) = expr_single(i)?;
+        loop {
+            let (j, suffix) = opt(alt((Self::attr, Self::index, Self::call, Self::r#try)))(i)?;
+            i = j;
 
-fn expr_index(i: &str) -> IResult<&str, Suffix<'_>> {
-    map(
-        preceded(ws(char('[')), cut(terminated(expr_any, ws(char(']'))))),
-        Suffix::Index,
-    )(i)
-}
+            match suffix {
+                Some(Self::Attr(attr)) => expr = Expr::Attr(expr.into(), attr),
+                Some(Self::Index(index)) => expr = Expr::Index(expr.into(), index.into()),
+                Some(Self::Call(args)) => expr = Expr::Call(expr.into(), args),
+                Some(Self::Try) => expr = Expr::Try(expr.into()),
+                None => break,
+            }
+        }
+        Ok((i, expr))
+    }
 
-fn expr_call(i: &str) -> IResult<&str, Suffix<'_>> {
-    map(arguments, Suffix::Call)(i)
-}
+    fn attr(i: &'a str) -> IResult<&'a str, Self> {
+        map(
+            preceded(
+                ws(pair(char('.'), not(char('.')))),
+                cut(alt((num_lit, identifier))),
+            ),
+            Self::Attr,
+        )(i)
+    }
 
-fn expr_try(i: &str) -> IResult<&str, Suffix<'_>> {
-    map(preceded(take_till(not_ws), char('?')), |_| Suffix::Try)(i)
+    fn index(i: &'a str) -> IResult<&'a str, Self> {
+        map(
+            preceded(ws(char('[')), cut(terminated(expr_any, ws(char(']'))))),
+            Self::Index,
+        )(i)
+    }
+
+    fn call(i: &'a str) -> IResult<&'a str, Self> {
+        map(arguments, Self::Call)(i)
+    }
+
+    fn r#try(i: &'a str) -> IResult<&'a str, Self> {
+        map(preceded(take_till(not_ws), char('?')), |_| Self::Try)(i)
+    }
 }
 
 fn filter(i: &str) -> IResult<&str, (&str, Option<Vec<Expr<'_>>>)> {
@@ -174,25 +193,9 @@ fn expr_filtered(i: &str) -> IResult<&str, Expr<'_>> {
 }
 
 fn expr_prefix(i: &str) -> IResult<&str, Expr<'_>> {
-    let (i, (ops, mut expr)) = pair(many0(ws(alt((tag("!"), tag("-"))))), expr_suffix)(i)?;
+    let (i, (ops, mut expr)) = pair(many0(ws(alt((tag("!"), tag("-"))))), Suffix::parse)(i)?;
     for op in ops.iter().rev() {
         expr = Expr::Unary(op, Box::new(expr));
-    }
-    Ok((i, expr))
-}
-
-fn expr_suffix(i: &str) -> IResult<&str, Expr<'_>> {
-    let (mut i, mut expr) = expr_single(i)?;
-    loop {
-        let (j, suffix) = opt(alt((expr_attr, expr_index, expr_call, expr_try)))(i)?;
-        i = j;
-        match suffix {
-            Some(Suffix::Attr(attr)) => expr = Expr::Attr(expr.into(), attr),
-            Some(Suffix::Index(index)) => expr = Expr::Index(expr.into(), index.into()),
-            Some(Suffix::Call(args)) => expr = Expr::Call(expr.into(), args),
-            Some(Suffix::Try) => expr = Expr::Try(expr.into()),
-            None => break,
-        }
     }
     Ok((i, expr))
 }

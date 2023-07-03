@@ -706,7 +706,7 @@ impl<'a> Cond<'a> {
         let (i, (_, pws, _, (cond, nws, _, block))) = p(i)?;
         Ok((
             i,
-            Cond {
+            Self {
                 ws: Ws(pws, nws),
                 cond,
                 block,
@@ -735,6 +735,6 @@ impl<'a> CondTest<'a> {
             ))),
         );
         let (i, (target, expr)) = p(i)?;
-        Ok((i, CondTest { target, expr }))
+        Ok((i, Self { target, expr }))
     }
 }
